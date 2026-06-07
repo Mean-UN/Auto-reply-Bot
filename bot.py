@@ -1,6 +1,7 @@
 ﻿import asyncio
 import logging
 import os
+import time
 from typing import Dict
 
 from dotenv import load_dotenv
@@ -32,9 +33,14 @@ AWAY_MESSAGE = os.getenv(
     "⚠ I am offline now\n⏳ please wait...\nThanks for your message. I will reply when I am back online.\n━━━━━━━━━━━━━━━━━━\n🇰🇭 ខ្ញុំមិនអនឡាញទេ\n⏳ សូមរង់ចាំ...\nអរគុណសម្រាប់សារ ខ្ញុំនឹងឆ្លើយតបវិញពេលខ្ញុំអនឡាញ។",
 ).replace("\\n", "\n").strip()
 AUTO_REPLY_ENABLED = os.getenv("AUTO_REPLY_ENABLED", "1").strip() == "1"
+AUTO_REPLY_COOLDOWN_SECONDS = int(
+    os.getenv("AUTO_REPLY_COOLDOWN_SECONDS", "3600").strip()
+)
 
 client = TelegramClient("personal_offline_reply", API_ID, API_HASH)
 last_auto_reply_message_id: Dict[int, int] = {}
+last_auto_reply_at: Dict[int, float] = {}
+manually_replied_chat_ids = set[int]()
 auto_reply_enabled = AUTO_REPLY_ENABLED
 away_message = AWAY_MESSAGE
 
@@ -86,10 +92,24 @@ async def auto_reply_handler(event: events.NewMessage.Event) -> None:
     if chat_id is None:
         return
 
+    if chat_id in manually_replied_chat_ids:
+        return
+
+    now = time.monotonic()
+    last_sent_at = last_auto_reply_at.get(chat_id)
+    if (
+        AUTO_REPLY_COOLDOWN_SECONDS > 0
+        and last_sent_at is not None
+        and now - last_sent_at < AUTO_REPLY_COOLDOWN_SECONDS
+    ):
+        logger.info("Skipped auto-reply due to cooldown in chat_id=%s", chat_id)
+        return
+
     try:
         await delete_previous_auto_reply(chat_id)
         sent = await event.reply(away_message)
         last_auto_reply_message_id[chat_id] = sent.id
+        last_auto_reply_at[chat_id] = now
         logger.info("Auto-replied in chat_id=%s", chat_id)
     except Exception as exc:  # pragma: no cover
         logger.exception("Failed to send auto-reply: %s", exc)
@@ -101,6 +121,9 @@ async def toggle_handler(event: events.NewMessage.Event) -> None:
 
     _, state = event.raw_text.strip().split()
     auto_reply_enabled = state.lower() == "on"
+    if auto_reply_enabled:
+        manually_replied_chat_ids.clear()
+        last_auto_reply_at.clear()
     status = "ON" if auto_reply_enabled else "OFF"
     await event.reply(f"Auto-reply is now {status}.")
     logger.info("Auto-reply toggled to %s", status)
@@ -109,7 +132,10 @@ async def toggle_handler(event: events.NewMessage.Event) -> None:
 @client.on(events.NewMessage(outgoing=True, pattern=r"(?i)^/away\s+status$"))
 async def status_handler(event: events.NewMessage.Event) -> None:
     status = "ON" if auto_reply_enabled else "OFF"
-    await event.reply(f"Auto-reply: {status} | Cooldown: OFF")
+    await event.reply(
+        f"Auto-reply: {status} | Cooldown: {AUTO_REPLY_COOLDOWN_SECONDS}s | "
+        f"Manual replies paused: {len(manually_replied_chat_ids)} chats"
+    )
 
 
 @client.on(events.NewMessage(outgoing=True, pattern=r"(?i)^/away\s+set\s+(.+)$"))
@@ -134,7 +160,7 @@ async def cleanup_on_manual_reply(event: events.NewMessage.Event) -> None:
     if not event.is_private:
         return
 
-    if event.raw_text.strip().lower().startswith("/away"):
+    if event.raw_text.strip().lower().startswith(("/away", "/offline")):
         return
 
     chat_id = event.chat_id
@@ -142,6 +168,8 @@ async def cleanup_on_manual_reply(event: events.NewMessage.Event) -> None:
         return
 
     await delete_previous_auto_reply(chat_id)
+    manually_replied_chat_ids.add(chat_id)
+    logger.info("Paused auto-reply after manual reply in chat_id=%s", chat_id)
 
 
 async def main() -> None:

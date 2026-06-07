@@ -6,9 +6,9 @@ This project auto-replies to private Telegram messages when you are offline/away
 - Uses your Telegram account session (not a separate bot account).
 - Replies only in private chats.
 - Skips bots and your own messages.
-- No cooldown: each new incoming message gets a fresh auto-reply.
+- Uses a per-chat cooldown before sending another auto-reply to the same person.
 - Deletes the previous auto-reply in that chat before sending a new one.
-- Deletes the auto-reply when you manually send a message in that chat.
+- Deletes the auto-reply and pauses future auto-replies in that chat when you manually send a message.
 - Lets you toggle at runtime with chat commands.
 
 ## Requirements
@@ -29,7 +29,7 @@ This project auto-replies to private Telegram messages when you are offline/away
    - `API_ID`
    - `API_HASH`
    - `PHONE`
-   - Optional: `AWAY_MESSAGE`, `AUTO_REPLY_ENABLED`
+   - Optional: `AWAY_MESSAGE`, `AUTO_REPLY_ENABLED`, `AUTO_REPLY_COOLDOWN_SECONDS`
    - For multi-line message in `.env`, use `\n` for new lines.
 
 ## Run
@@ -48,6 +48,8 @@ First run asks for Telegram login code and 2FA password (if enabled).
 ## Notes
 - Keep this script running on your PC/VPS.
 - If you stop it, auto-replies stop.
+- Sending `/away on` also clears chats paused by manual replies, so auto-replies start fresh.
+- Set `AUTO_REPLY_COOLDOWN_SECONDS=0` to disable cooldown and reply to every incoming message.
 - Use responsibly and follow Telegram terms.
 
 ## Host on AWS (EC2 Ubuntu)
